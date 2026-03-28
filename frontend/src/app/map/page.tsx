@@ -4,11 +4,12 @@ import { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { MapPin, List, Navigation, AlertCircle, Loader2 } from 'lucide-react';
-import ReviewCard from '@/components/feed/ReviewCard';
 import { getMapBusinesses } from '@/lib/api';
 import type { MapBusiness } from '@/lib/api';
 import { useGeolocation, distanceKm } from '@/hooks/useGeolocation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import QuickReviewFAB from '@/components/review/QuickReviewFAB';
 
 // Dynamically import TrustMap to avoid SSR (Mapbox requires browser APIs)
 const TrustMap = dynamic(() => import('@/components/map/TrustMap'), {
@@ -23,22 +24,24 @@ const TrustMap = dynamic(() => import('@/components/map/TrustMap'), {
 type ViewMode = 'map' | 'list';
 
 export default function MapPage() {
+  const { user } = useAuth();
   const [businesses, setBusinesses] = useState<MapBusiness[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [nearMeActive, setNearMeActive] = useState(false);
 
   const geo = useGeolocation();
 
-  // Load businesses
+  // Load businesses — only when authenticated
   useEffect(() => {
+    if (!user) return;
     setLoading(true);
     getMapBusinesses()
       .then(setBusinesses)
       .catch((e) => setError(e.message ?? 'Failed to load map data'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [user]);
 
   // Handle Near Me toggle
   const handleNearMe = () => {
@@ -161,14 +164,31 @@ export default function MapPage() {
           {/* Map view */}
           {viewMode === 'map' && (
             <div className="w-full h-full relative">
-              {hasMapData || loading ? (
-                <TrustMap
-                  businesses={filteredBusinesses}
-                  userLocation={geo.coords}
-                  loading={loading}
-                />
-              ) : (
-                <EmptyMapState nearMeActive={nearMeActive} />
+              {/* Always render the map — tiles are public */}
+              <TrustMap
+                businesses={filteredBusinesses}
+                userLocation={geo.coords}
+                loading={loading}
+              />
+              {/* Unauthenticated overlay — only the pins are gated */}
+              {!user && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-max max-w-[90vw] bg-white/95 backdrop-blur-sm border border-slate-200 rounded-2xl px-5 py-3 shadow-lg text-center">
+                  <p className="text-sm font-medium text-slate-700">
+                    Sign in to see reviews from your network
+                  </p>
+                  <Link
+                    href="/login"
+                    className="mt-1 inline-block text-sm font-semibold text-amber-600 hover:underline"
+                  >
+                    Sign in →
+                  </Link>
+                </div>
+              )}
+              {/* Empty state only when authed and no data */}
+              {user && !loading && !hasMapData && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <EmptyMapState nearMeActive={nearMeActive} />
+                </div>
               )}
             </div>
           )}
@@ -176,7 +196,18 @@ export default function MapPage() {
           {/* List view */}
           {viewMode === 'list' && (
             <div className="h-full overflow-y-auto">
-              {loading ? (
+              {!user ? (
+                <div className="flex items-center justify-center h-full p-8 min-h-[300px]">
+                  <div className="text-center space-y-3 max-w-xs">
+                    <MapPin className="w-12 h-12 text-slate-200 mx-auto" />
+                    <p className="font-semibold text-slate-700">Sign in to see trusted places</p>
+                    <p className="text-sm text-slate-400">See reviews from people you actually know.</p>
+                    <Link href="/login" className="inline-block text-sm font-semibold text-amber-600 hover:underline">
+                      Sign in →
+                    </Link>
+                  </div>
+                </div>
+              ) : loading ? (
                 <ListSkeleton />
               ) : filteredBusinesses.length === 0 ? (
                 <EmptyListState nearMeActive={nearMeActive} />
@@ -199,6 +230,9 @@ export default function MapPage() {
           <LegendItem color="#f59e0b" label="Network reviewed" dashed />
         </div>
       </div>
+
+      {/* Quick Review FAB */}
+      <QuickReviewFAB />
     </div>
   );
 }

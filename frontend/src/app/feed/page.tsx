@@ -16,6 +16,7 @@ import QuickReviewFAB from '@/components/review/QuickReviewFAB';
 import { PenLine, List, Map as MapIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useAuth } from '@/hooks/useAuth';
 
 // Lazy-load TrustMap to avoid SSR issues
 const TrustMap = dynamic(() => import('@/components/map/TrustMap'), { ssr: false });
@@ -32,6 +33,7 @@ const CATEGORY_TILES = [
 ];
 
 export default function FeedPage() {
+  const { user } = useAuth();
   const [category, setCategory] = useState('');
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,22 +76,26 @@ export default function FeedPage() {
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setReviews([]);
     setNextCursor(undefined);
     setHasMore(true);
     fetchFeed(category);
-  }, [category, fetchFeed]);
+  }, [category, fetchFeed, user]);
 
-  // Load map data when switching to map view
+  // Load map data when switching to map view (only if authenticated)
   useEffect(() => {
-    if (viewMode === 'map' && mapBusinesses.length === 0 && !mapLoading) {
+    if (viewMode === 'map' && mapBusinesses.length === 0 && !mapLoading && user) {
       setMapLoading(true);
       getMapBusinesses()
         .then(setMapBusinesses)
         .catch(() => {})
         .finally(() => setMapLoading(false));
     }
-  }, [viewMode, mapBusinesses.length, mapLoading]);
+  }, [viewMode, mapBusinesses.length, mapLoading, user]);
 
   // Persist view preference
   const toggleView = (mode: 'list' | 'map') => {
