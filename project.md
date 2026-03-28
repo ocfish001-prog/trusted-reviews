@@ -2,7 +2,7 @@
 
 > Semi-closed, invite-only reviews platform — see recommendations from people you trust.
 
-## Current Phase: 🔄 Phase 1 — Foundation + Core Features (Sprint 1 MVP)
+## Current Phase: 🔄 Phase 1 — Sprint 1 MVP (Deploy pending backend)
 
 ## Phases
 
@@ -22,16 +22,25 @@
 ## Sprint 1 Deliverables
 - [x] PRD review
 - [x] Architecture planning
-- [ ] FastAPI backend with all API routes
-- [ ] Supabase DB schema + RLS policies
-- [ ] Next.js frontend with all pages
-- [ ] Auth (invite-only signup, login, magic link)
-- [ ] Trust-scoped feed
-- [ ] Review writing with AI polish
-- [ ] Business pages
-- [ ] User profiles
-- [ ] Invite management
-- [ ] Deploy to Netlify + Railway
+- [x] FastAPI backend with all API routes (6 routers)
+- [x] Supabase DB schema + RLS policies + 2-hop trust function
+- [x] Next.js frontend with all 8 pages
+- [x] Auth (invite-only signup, login, magic link)
+- [x] Trust-scoped feed with filters
+- [x] Review writing with AI polish (Polish/Structure/Add Detail)
+- [x] Business pages with network stats
+- [x] User profiles with reviews
+- [x] Invite management (generate, list, copy link)
+- [x] Frontend deployed to Netlify
+- [x] GitHub repo created (private)
+- [ ] Backend deployed to Railway (token expired)
+- [ ] Supabase schema applied
 
-## Known Issues
-- secrets.json path needs sandbox escape for Railway token
+## Live URLs
+- **Frontend:** https://trusted-reviews-app.netlify.app
+- **Backend:** Pending Railway deploy (token needs refresh)
+- **GitHub:** https://github.com/ocfish001-prog/trusted-reviews (private)
+
+## Blockers
+- Railway API token expired — needs Big Poppa to generate a new one
+- Supabase schema needs to be applied via dashboard or CLI
