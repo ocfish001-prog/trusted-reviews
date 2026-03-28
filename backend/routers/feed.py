@@ -3,6 +3,7 @@ Feed router — paginated, trust-scoped review feed.
 """
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
 from models.schemas import FeedResponse, ReviewWithContext, UserOut, BusinessOut
 from services.trust_graph import get_trust_graph
@@ -14,17 +15,19 @@ router = APIRouter(prefix="/feed", tags=["feed"])
 
 @router.get(
     "",
-    response_model=FeedResponse,
     summary="Get trust-scoped review feed",
     description=(
         "Returns paginated reviews from the authenticated user's 2-hop trust network. "
-        "Results are ordered newest-first. Optionally filter by business category."
+        "Results are ordered newest-first. Optionally filter by business category. "
+        "Supports both cursor-based (cursor=<opaque string>) and page-based (page=N) pagination. "
+        "Response includes next_cursor for cursor-based clients and has_more for page-based clients."
     ),
 )
 async def get_feed(
-    page: int = Query(default=1, ge=1, description="Page number"),
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     limit: int = Query(default=20, ge=1, le=100, description="Reviews per page"),
     category: Optional[str] = Query(default=None, description="Filter by business category"),
+    cursor: Optional[str] = Query(default=None, description="Cursor for pagination (opaque, page-encoded)"),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -41,7 +44,15 @@ async def get_feed(
     all_trusted = list(direct_friends | set(fof.keys()))
 
     if not all_trusted:
-        return FeedResponse(reviews=[], total=0, page=page, has_more=False)
+        return {"reviews": [], "total": 0, "page": page, "has_more": False, "next_cursor": None}
+
+    # Resolve page from cursor if provided (cursor is just base64-encoded page number)
+    if cursor:
+        try:
+            import base64
+            page = int(base64.b64decode(cursor).decode())
+        except Exception:
+            page = 1
 
     offset = (page - 1) * limit
     pool = get_pool()
@@ -212,9 +223,18 @@ async def get_feed(
         except Exception:
             continue
 
-    return FeedResponse(
-        reviews=reviews_out,
-        total=total,
-        page=page,
-        has_more=(offset + limit) < total,
-    )
+    has_more = (offset + limit) < total
+
+    # Build next_cursor for cursor-based pagination clients
+    next_cursor = None
+    if has_more:
+        import base64
+        next_cursor = base64.b64encode(str(page + 1).encode()).decode()
+
+    return {
+        "reviews": [r.model_dump(mode="json") for r in reviews_out],
+        "total": total,
+        "page": page,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+    }

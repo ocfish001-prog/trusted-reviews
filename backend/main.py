@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from services.database import init_pool, close_pool
-from routers import auth, feed, reviews, businesses, invites, graph
+from routers import auth, feed, reviews, businesses, invites, graph, users
 
 
 @asynccontextmanager
@@ -69,6 +69,7 @@ app.include_router(reviews.router)
 app.include_router(businesses.router)
 app.include_router(invites.router)
 app.include_router(graph.router)
+app.include_router(users.router)
 
 
 # ============================================================
