@@ -58,7 +58,7 @@ export default function Navbar() {
               </Link>
               <button
                 onClick={logout}
-                className="hidden sm:block text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
               >
                 Sign out
               </button>

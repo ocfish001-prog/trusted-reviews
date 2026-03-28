@@ -113,6 +113,9 @@ export default function TrustMap({ businesses, userLocation, loading }: TrustMap
       };
       renderPin(false);
 
+      // Stop map click from propagating through pin markers
+      container.addEventListener('click', (e) => e.stopPropagation());
+
       const marker = new mgl.default.Marker({ element: container, anchor: 'bottom' })
         .setLngLat([biz.lng, biz.lat])
         .addTo(mapRef.current!);
