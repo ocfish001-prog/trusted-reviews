@@ -195,7 +195,11 @@ export async function combinedSearch(
 }
 
 export async function getBusinessReviews(id: string): Promise<{ reviews: Review[]; network_stats: { friend_count: number; hop2_count: number; avg_rating: number } }> {
-  return request(`/businesses/${id}/reviews`);
+  const raw = await request<{ reviews: (Review & { reviewer?: User })[]; network_stats: { friend_count: number; hop2_count: number; avg_rating: number } }>(`/businesses/${id}/reviews`);
+  return {
+    reviews: raw.reviews.map(normalizeReview),
+    network_stats: raw.network_stats,
+  };
 }
 
 // Map
