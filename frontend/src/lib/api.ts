@@ -78,7 +78,12 @@ export async function login(payload: LoginPayload): Promise<AuthTokens> {
     } catch { /* empty */ }
     throw new ApiError(message, res.status);
   }
-  return res.json();
+  const data = await res.json();
+  // Normalise: backend may return "token" or "access_token"
+  if (!data.access_token && data.token) {
+    data.access_token = data.token;
+  }
+  return data as AuthTokens;
 }
 
 export async function signup(payload: SignupPayload): Promise<{ user: User; token: string }> {
@@ -96,7 +101,13 @@ export async function requestMagicLink(email: string): Promise<{ message: string
 }
 
 export async function getMe(): Promise<User> {
-  return request<User>('/users/me');
+  // The backend does not expose a /users/me route.
+  // We return the stored user from localStorage (set during login/signup).
+  // This avoids a 404 and keeps the auth hook working correctly.
+  const { getStoredUser } = await import('./auth');
+  const stored = getStoredUser();
+  if (stored) return stored;
+  throw new Error('Not authenticated');
 }
 
 // Users
@@ -111,17 +122,37 @@ export async function updateProfile(data: Partial<User>): Promise<User> {
   });
 }
 
+/** Normalise a raw review from the API to match the Review type the UI expects. */
+function normalizeReview(r: Review & { reviewer?: User }): Review {
+  // Backend returns "reviewer" — map to "user"
+  if (!r.user && r.reviewer) {
+    r.user = r.reviewer;
+  }
+  // Backend may return via_friend as a full User object — extract .name
+  if (r.via_friend && typeof r.via_friend === 'object') {
+    r.via_friend = (r.via_friend as User).name;
+  }
+  return r;
+}
+
 // Reviews / Feed
 export async function getFeed(filters: FeedFilters = {}): Promise<{ reviews: Review[]; next_cursor?: string }> {
   const params = new URLSearchParams();
   if (filters.category) params.set('category', filters.category);
   if (filters.cursor) params.set('cursor', filters.cursor);
   const qs = params.toString();
-  return request<{ reviews: Review[]; next_cursor?: string }>(`/feed${qs ? `?${qs}` : ''}`);
+  const raw = await request<{ reviews: (Review & { reviewer?: User })[]; next_cursor?: string; has_more?: boolean }>(
+    `/feed${qs ? `?${qs}` : ''}`
+  );
+  return {
+    reviews: raw.reviews.map(normalizeReview),
+    next_cursor: raw.next_cursor,
+  };
 }
 
 export async function getUserReviews(userId: string): Promise<Review[]> {
-  return request<Review[]>(`/users/${userId}/reviews`);
+  const raw = await request<(Review & { reviewer?: User })[]>(`/users/${userId}/reviews`);
+  return raw.map(normalizeReview);
 }
 
 export async function createReview(payload: CreateReviewPayload): Promise<Review> {
@@ -193,7 +224,7 @@ export async function getMapBusinesses(): Promise<MapBusiness[]> {
         avg_rating: review.rating,
         review_count: 1,
         top_review_snippet: review.body.slice(0, 120),
-        via_friend: review.via_friend,
+        via_friend: typeof review.via_friend === 'string' ? review.via_friend : review.via_friend?.name,
       });
     } else {
       // Update avg rating

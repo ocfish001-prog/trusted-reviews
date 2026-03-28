@@ -6,7 +6,7 @@ import Link from 'next/link';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 import { login, requestMagicLink } from '@/lib/api';
-import { setToken } from '@/lib/auth';
+import { setToken, setStoredUser } from '@/lib/auth';
 
 type Mode = 'password' | 'magic';
 
@@ -27,6 +27,11 @@ export default function LoginForm() {
     try {
       const tokens = await login({ email, password });
       setToken(tokens.access_token);
+      // Store the user object returned by the login endpoint so useAuth
+      // can hydrate from localStorage without a /users/me call.
+      if (tokens.user) {
+        setStoredUser(tokens.user);
+      }
       router.push('/feed');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');

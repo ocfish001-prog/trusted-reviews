@@ -57,10 +57,14 @@ export interface Review {
   visibility: 'friends' | '2hop' | 'private';
   ai_polished: boolean;
   created_at: string;
+  /** API returns this as "reviewer" — normalised to "user" in api.ts */
   user?: User;
+  /** Also accepted as the raw API field name */
+  reviewer?: User;
   business?: Business;
   trust_distance?: number;
-  via_friend?: string;
+  /** API may return full User object or a name string */
+  via_friend?: string | User | null;
 }
 
 export interface Invite {
@@ -80,7 +84,11 @@ export interface FeedFilters {
 
 export interface AuthTokens {
   access_token: string;
+  /** Some endpoints also return "token" as an alias */
+  token?: string;
   token_type: string;
+  /** User object returned by the login endpoint */
+  user?: User;
 }
 
 export interface LoginPayload {

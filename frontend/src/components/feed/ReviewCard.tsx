@@ -56,7 +56,9 @@ export default function ReviewCard({ review }: ReviewCardProps) {
             {trust_distance === 2 && via_friend && (
               <p className="text-xs text-slate-400 truncate mt-0.5">
                 via{' '}
-                <span className="text-amber-600 font-medium">{via_friend}</span>
+                <span className="text-amber-600 font-medium">
+                  {typeof via_friend === 'string' ? via_friend : via_friend.name}
+                </span>
               </p>
             )}
             {trust_distance === 1 && (
@@ -69,7 +71,7 @@ export default function ReviewCard({ review }: ReviewCardProps) {
           <TrustBadge
             distance={trust_distance}
             reviewerName={user?.name}
-            viaFriend={via_friend}
+            viaFriend={typeof via_friend === 'string' ? via_friend : via_friend?.name}
           />
           {ai_polished && (
             <Badge variant="amber">✨ AI</Badge>

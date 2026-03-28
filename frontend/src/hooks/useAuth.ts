@@ -15,13 +15,20 @@ interface AuthState {
 
 export function useAuth(): AuthState {
   const [user, setUser] = useState<User | null>(getStoredUser);
-  const [loading, setLoading] = useState<boolean>(!getStoredUser());
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchUser = useCallback(async () => {
     const token = getToken();
     if (!token) {
       setUser(null);
+      setLoading(false);
+      return;
+    }
+    // If we already have a stored user, use it immediately (no network call needed).
+    const stored = getStoredUser();
+    if (stored) {
+      setUser(stored);
       setLoading(false);
       return;
     }
