@@ -14,7 +14,7 @@ from models.schemas import (
     UserOut,
     BusinessOut,
 )
-from services.supabase_client import supabase
+from services.database import get_pool
 from services.trust_graph import get_trust_graph
 from services import ai_polish
 from .auth_deps import get_current_user
@@ -37,8 +37,9 @@ async def create_review(
     current_user: dict = Depends(get_current_user),
 ):
     """Create a review, optionally creating the business if it doesn't exist."""
-    user_id: str = current_user["id"]
+    user_id: str = str(current_user["id"])
     business_id: str | None = str(body.business_id) if body.business_id else None
+    pool = get_pool()
 
     # Resolve or create business
     if not business_id:
@@ -47,59 +48,57 @@ async def create_review(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Either business_id or business_name must be provided.",
             )
-        biz_insert = (
-            supabase.table("businesses")
-            .insert(
-                {
-                    "name": body.business_name,
-                    "category": body.category,
-                    "address": body.address,
-                }
-            )
-            .execute()
+        biz_row = await pool.fetchrow(
+            """
+            INSERT INTO businesses (name, category, address)
+            VALUES ($1, $2, $3)
+            RETURNING id, name, category, address, lat, lng, google_place_id, created_at
+            """,
+            body.business_name,
+            body.category,
+            body.address,
         )
-        if not biz_insert.data:
+        if not biz_row:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create business.",
             )
-        business_id = biz_insert.data[0]["id"]
+        business_id = str(biz_row["id"])
     else:
         # Verify business exists
-        biz_check = (
-            supabase.table("businesses")
-            .select("id")
-            .eq("id", business_id)
-            .single()
-            .execute()
+        exists = await pool.fetchrow(
+            "SELECT id FROM businesses WHERE id = $1", business_id
         )
-        if not biz_check.data:
+        if not exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Business {business_id} not found.",
             )
 
     # Insert review
-    review_data = {
-        "user_id": user_id,
-        "business_id": business_id,
-        "rating": body.rating,
-        "body": body.body,
-        "pros": body.pros or [],
-        "cons": body.cons or [],
-        "visibility": body.visibility or "2hop",
-        "ai_polished": body.ai_polished or False,
-    }
+    result = await pool.fetchrow(
+        """
+        INSERT INTO reviews (user_id, business_id, rating, body, pros, cons, visibility, ai_polished)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, user_id, business_id, rating, body, pros, cons, visibility, ai_polished, created_at
+        """,
+        user_id,
+        business_id,
+        body.rating,
+        body.body,
+        body.pros or [],
+        body.cons or [],
+        body.visibility or "2hop",
+        body.ai_polished or False,
+    )
 
-    result = supabase.table("reviews").insert(review_data).execute()
-
-    if not result.data:
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to insert review.",
         )
 
-    return CreateReviewResponse(review=ReviewOut(**result.data[0]))
+    return CreateReviewResponse(review=ReviewOut(**dict(result)))
 
 
 @router.post(
@@ -166,46 +165,79 @@ async def get_business_reviews(
     current_user: dict = Depends(get_current_user),
 ):
     """Fetch trust-scoped reviews for a specific business."""
-    user_id: str = current_user["id"]
+    user_id: str = str(current_user["id"])
+    pool = get_pool()
 
     # Fetch business
-    biz_result = (
-        supabase.table("businesses")
-        .select("*")
-        .eq("id", business_id)
-        .single()
-        .execute()
+    biz_row = await pool.fetchrow(
+        "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
+        business_id,
     )
-    if not biz_result.data:
+    if not biz_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Business {business_id} not found.",
         )
-    business = BusinessOut(**biz_result.data)
+    business = BusinessOut(**dict(biz_row))
 
     # Get trust graph
-    direct_friends, fof = get_trust_graph(user_id)
+    direct_friends, fof = await get_trust_graph(user_id)
     all_trusted = list(direct_friends | set(fof.keys()) | {user_id})
 
-    # Fetch reviews for this business from trusted users
-    result = (
-        supabase.table("reviews")
-        .select(
-            "*, users!reviews_user_id_fkey(id, name, avatar_url, location, email, bio, invite_code, created_at)"
-        )
-        .eq("business_id", business_id)
-        .in_("user_id", all_trusted)
-        .neq("visibility", "private")
-        .order("created_at", desc=True)
-        .execute()
+    # Fetch reviews with reviewer info via JOIN
+    rows = await pool.fetch(
+        """
+        SELECT
+            r.id,
+            r.rating,
+            r.body,
+            r.pros,
+            r.cons,
+            r.visibility,
+            r.ai_polished,
+            r.created_at,
+            r.user_id       AS author_id,
+            u.email         AS reviewer_email,
+            u.name          AS reviewer_name,
+            u.bio           AS reviewer_bio,
+            u.avatar_url    AS reviewer_avatar_url,
+            u.location      AS reviewer_location,
+            u.invite_code   AS reviewer_invite_code,
+            u.created_at    AS reviewer_created_at
+        FROM reviews r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.business_id = $1
+          AND r.user_id = ANY($2::uuid[])
+          AND r.visibility != 'private'
+        ORDER BY r.created_at DESC
+        """,
+        business_id,
+        all_trusted,
     )
 
-    reviews_out = []
-    user_cache: dict = {}
+    # Batch-fetch via_friend profiles
+    via_ids_needed: set = set()
+    for row in rows:
+        author_id = str(row["author_id"])
+        if author_id != user_id and author_id not in direct_friends:
+            via_id = fof.get(author_id)
+            if via_id:
+                via_ids_needed.add(via_id)
 
-    for row in result.data or []:
-        author_id: str = row["user_id"]
-        reviewer_data = row.get("users") or {}
+    via_profile_map: dict = {}
+    if via_ids_needed:
+        via_rows = await pool.fetch(
+            """
+            SELECT id, email, name, bio, avatar_url, location, invite_code, created_at
+            FROM users WHERE id = ANY($1::uuid[])
+            """,
+            list(via_ids_needed),
+        )
+        via_profile_map = {str(r["id"]): dict(r) for r in via_rows}
+
+    reviews_out = []
+    for row in rows:
+        author_id = str(row["author_id"])
 
         if author_id == user_id:
             trust_distance = 0
@@ -215,13 +247,10 @@ async def get_business_reviews(
             via_friend_data = None
         else:
             trust_distance = 2
-            if row.get("visibility") == "friends":
+            if row["visibility"] == "friends":
                 continue
             via_friend_id = fof.get(author_id)
-            if via_friend_id and via_friend_id not in user_cache:
-                vf = supabase.table("users").select("*").eq("id", via_friend_id).single().execute()
-                user_cache[via_friend_id] = vf.data
-            via_raw = user_cache.get(via_friend_id) if via_friend_id else None
+            via_raw = via_profile_map.get(via_friend_id) if via_friend_id else None
             via_friend_data = UserOut(**via_raw) if via_raw else None
 
         try:
@@ -229,15 +258,24 @@ async def get_business_reviews(
                 ReviewWithContext(
                     id=row["id"],
                     rating=row["rating"],
-                    body=row.get("body"),
-                    pros=row.get("pros"),
-                    cons=row.get("cons"),
+                    body=row["body"],
+                    pros=row["pros"],
+                    cons=row["cons"],
                     visibility=row["visibility"],
-                    ai_polished=row.get("ai_polished", False),
+                    ai_polished=row["ai_polished"],
                     created_at=row["created_at"],
                     trust_distance=trust_distance,
                     via_friend=via_friend_data,
-                    reviewer=UserOut(**reviewer_data) if reviewer_data else None,
+                    reviewer=UserOut(
+                        id=row["author_id"],
+                        email=row["reviewer_email"],
+                        name=row["reviewer_name"],
+                        bio=row["reviewer_bio"],
+                        avatar_url=row["reviewer_avatar_url"],
+                        location=row["reviewer_location"],
+                        invite_code=row["reviewer_invite_code"],
+                        created_at=row["reviewer_created_at"],
+                    ),
                     business=business,
                 )
             )

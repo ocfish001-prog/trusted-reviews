@@ -3,11 +3,22 @@ Trusted Reviews Network — FastAPI Application
 
 Entry point. Configures CORS, mounts all routers, and provides health check.
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from services.database import init_pool, close_pool
 from routers import auth, feed, reviews, businesses, invites, graph
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown lifecycle for the asyncpg pool."""
+    await init_pool(settings.database_url)
+    yield
+    await close_pool()
+
 
 app = FastAPI(
     title="Trusted Reviews Network API",
@@ -19,6 +30,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # ============================================================

@@ -1,14 +1,15 @@
 """
 Application configuration loaded from environment variables.
 """
-from pydantic_settings import BaseSettings
 from typing import List
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    supabase_url: str
-    supabase_key: str  # service-role key (bypasses RLS for admin ops)
-    supabase_anon_key: str
+    database_url: str  # postgresql://user:pass@host:port/dbname (Railway provides this)
+    jwt_secret: str  # random secret for signing JWTs
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 10080  # 7 days
     anthropic_api_key: str
     cors_origins: str = "http://localhost:3000"
     port: int = 8000

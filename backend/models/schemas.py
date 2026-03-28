@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 # ============================================================
@@ -13,10 +13,15 @@ from pydantic import BaseModel, EmailStr, Field
 # ============================================================
 
 class SignupRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str = Field(..., min_length=8)
     name: str = Field(..., min_length=1, max_length=100)
     invite_code: str = Field(..., min_length=6, max_length=20)
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 class UserOut(BaseModel):
@@ -31,6 +36,11 @@ class UserOut(BaseModel):
 
 
 class SignupResponse(BaseModel):
+    user: UserOut
+    token: str
+
+
+class LoginResponse(BaseModel):
     user: UserOut
     token: str
 
@@ -97,7 +107,7 @@ class ReviewWithContext(BaseModel):
     visibility: str
     ai_polished: bool
     created_at: datetime
-    trust_distance: int  # 1 or 2
+    trust_distance: int  # 0 (self), 1 (direct friend), or 2 (fof)
     via_friend: Optional[UserOut]  # populated for 2-hop reviews
     reviewer: UserOut
     business: BusinessOut

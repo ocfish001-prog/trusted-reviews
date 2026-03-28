@@ -4,7 +4,7 @@ Businesses router — search for businesses using trigram similarity.
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from models.schemas import BusinessSearchResponse, BusinessOut
-from services.supabase_client import supabase
+from services.database import get_pool
 from .auth_deps import get_current_user
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
@@ -28,15 +28,18 @@ async def search_businesses(
     Trigram-based business name search.
     Uses the pg_trgm GIN index on businesses.name for fast fuzzy matching.
     """
+    pool = get_pool()
     try:
-        # Supabase supports .ilike() for case-insensitive substring matching.
-        # For trigram similarity, we use the RPC approach or ilike with wildcards.
-        result = (
-            supabase.table("businesses")
-            .select("*")
-            .ilike("name", f"%{q}%")
-            .limit(limit)
-            .execute()
+        rows = await pool.fetch(
+            """
+            SELECT id, name, category, address, lat, lng, google_place_id, created_at
+            FROM businesses
+            WHERE name ILIKE $1
+            ORDER BY name
+            LIMIT $2
+            """,
+            f"%{q}%",
+            limit,
         )
     except Exception as exc:
         raise HTTPException(
@@ -44,5 +47,5 @@ async def search_businesses(
             detail=f"Search failed: {str(exc)}",
         )
 
-    businesses = [BusinessOut(**b) for b in (result.data or [])]
+    businesses = [BusinessOut(**dict(b)) for b in rows]
     return BusinessSearchResponse(businesses=businesses)

@@ -4,7 +4,7 @@ Graph router — friend and 2-hop connection graph for the current user.
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from models.schemas import GraphResponse, FriendOut, FriendOfFriendOut, UserOut
-from services.supabase_client import supabase
+from services.database import get_pool
 from services.trust_graph import get_trust_graph
 from .auth_deps import get_current_user
 
@@ -26,35 +26,36 @@ async def get_connections(current_user: dict = Depends(get_current_user)):
     - friends: direct accepted friends with friendship_since date
     - friends_of_friends: 2-hop connections with via_friend metadata
     """
-    user_id: str = current_user["id"]
+    user_id: str = str(current_user["id"])
+    pool = get_pool()
 
-    direct_friends, fof = get_trust_graph(user_id)
+    direct_friends, fof = await get_trust_graph(user_id)
 
-    # Fetch direct friend profiles + friendship dates
+    # Fetch direct friend profiles + friendship dates in one query each
     friends_out = []
     if direct_friends:
-        # Fetch user profiles
-        profiles_result = (
-            supabase.table("users")
-            .select("id, name, avatar_url, location, email, bio, invite_code, created_at")
-            .in_("id", list(direct_friends))
-            .execute()
+        profiles_rows = await pool.fetch(
+            """
+            SELECT id, email, name, bio, avatar_url, location, invite_code, created_at
+            FROM users WHERE id = ANY($1::uuid[])
+            """,
+            list(direct_friends),
         )
-        profile_map = {p["id"]: p for p in (profiles_result.data or [])}
+        profile_map = {str(r["id"]): dict(r) for r in profiles_rows}
 
-        # Fetch friendship dates
-        friendships_result = (
-            supabase.table("friendships")
-            .select("user_a, user_b, created_at")
-            .eq("status", "accepted")
-            .or_(
-                f"user_a.eq.{user_id},user_b.eq.{user_id}"
-            )
-            .execute()
+        # Fetch friendship creation dates
+        friendship_rows = await pool.fetch(
+            """
+            SELECT user_a, user_b, created_at
+            FROM friendships
+            WHERE status = 'accepted'
+              AND (user_a = $1 OR user_b = $1)
+            """,
+            user_id,
         )
-        friendship_date_map = {}
-        for fs in (friendships_result.data or []):
-            peer = fs["user_b"] if fs["user_a"] == user_id else fs["user_a"]
+        friendship_date_map: dict = {}
+        for fs in friendship_rows:
+            peer = str(fs["user_b"]) if str(fs["user_a"]) == user_id else str(fs["user_a"])
             friendship_date_map[peer] = fs["created_at"]
 
         for friend_id in direct_friends:
@@ -71,20 +72,21 @@ async def get_connections(current_user: dict = Depends(get_current_user)):
                 )
             )
 
-    # Fetch fof profiles + build via_friend map
+    # Fetch fof profiles + via_friend profiles in one batch query
     fof_out = []
     if fof:
         all_fof_ids = list(fof.keys())
         all_via_ids = list(set(fof.values()))
         all_ids_to_fetch = list(set(all_fof_ids + all_via_ids))
 
-        profiles_result = (
-            supabase.table("users")
-            .select("id, name, avatar_url, location, email, bio, invite_code, created_at")
-            .in_("id", all_ids_to_fetch)
-            .execute()
+        profiles_rows = await pool.fetch(
+            """
+            SELECT id, email, name, bio, avatar_url, location, invite_code, created_at
+            FROM users WHERE id = ANY($1::uuid[])
+            """,
+            all_ids_to_fetch,
         )
-        profile_map = {p["id"]: p for p in (profiles_result.data or [])}
+        profile_map = {str(r["id"]): dict(r) for r in profiles_rows}
 
         for fof_id, via_id in fof.items():
             fof_profile = profile_map.get(fof_id)

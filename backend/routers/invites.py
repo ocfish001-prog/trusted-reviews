@@ -6,7 +6,7 @@ import string
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from models.schemas import GenerateInviteResponse, InvitesListResponse, InviteOut
-from services.supabase_client import supabase
+from services.database import get_pool
 from config import settings
 from .auth_deps import get_current_user
 
@@ -33,19 +33,16 @@ async def generate_invite(current_user: dict = Depends(get_current_user)):
     Generate a unique invite code and insert into the invites table.
     Retries up to 5 times on collision (extremely unlikely).
     """
-    user_id: str = current_user["id"]
+    user_id: str = str(current_user["id"])
+    pool = get_pool()
 
     code = None
     for _ in range(5):
         candidate = _generate_code()
-        # Check for collision
-        existing = (
-            supabase.table("invites")
-            .select("id")
-            .eq("code", candidate)
-            .execute()
+        existing = await pool.fetchrow(
+            "SELECT id FROM invites WHERE code = $1", candidate
         )
-        if not existing.data:
+        if not existing:
             code = candidate
             break
 
@@ -55,13 +52,17 @@ async def generate_invite(current_user: dict = Depends(get_current_user)):
             detail="Failed to generate a unique invite code. Please try again.",
         )
 
-    result = (
-        supabase.table("invites")
-        .insert({"code": code, "created_by": user_id})
-        .execute()
+    result = await pool.fetchrow(
+        """
+        INSERT INTO invites (code, created_by)
+        VALUES ($1, $2)
+        RETURNING id, code, created_by, used_by, created_at, used_at
+        """,
+        code,
+        user_id,
     )
 
-    if not result.data:
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save invite code.",
@@ -82,15 +83,18 @@ async def generate_invite(current_user: dict = Depends(get_current_user)):
 )
 async def list_invites(current_user: dict = Depends(get_current_user)):
     """Return all invites created by the current user."""
-    user_id: str = current_user["id"]
+    user_id: str = str(current_user["id"])
+    pool = get_pool()
 
-    result = (
-        supabase.table("invites")
-        .select("*")
-        .eq("created_by", user_id)
-        .order("created_at", desc=True)
-        .execute()
+    rows = await pool.fetch(
+        """
+        SELECT id, code, created_by, used_by, created_at, used_at
+        FROM invites
+        WHERE created_by = $1
+        ORDER BY created_at DESC
+        """,
+        user_id,
     )
 
-    invites = [InviteOut(**inv) for inv in (result.data or [])]
+    invites = [InviteOut(**dict(inv)) for inv in rows]
     return InvitesListResponse(invites=invites)
