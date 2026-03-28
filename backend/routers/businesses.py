@@ -10,11 +10,37 @@ from models.schemas import (
     GooglePlaceUpsertRequest,
     CombinedSearchResponse,
     ReviewSearchResult,
+    ReviewWithContext,
+    UserOut,
 )
 from services.database import get_pool
+from services.trust_graph import get_trust_graph
 from .auth_deps import get_current_user
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
+
+
+@router.get(
+    "/{business_id}",
+    response_model=BusinessOut,
+    summary="Get a business by ID",
+)
+async def get_business(
+    business_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch a single business by its UUID."""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
+        business_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Business {business_id} not found.",
+        )
+    return BusinessOut(**dict(row))
 
 
 @router.get(
@@ -229,3 +255,129 @@ async def combined_search(
         )
 
     return CombinedSearchResponse(businesses=businesses, reviews=reviews)
+
+
+@router.get(
+    "/{business_id}/reviews",
+    summary="Get trust-scoped reviews for a business (plural route)",
+    description=(
+        "Returns reviews for a business filtered to the user's 2-hop trust network. "
+        "Response shape: {reviews, network_stats: {friend_count, hop2_count, avg_rating}}."
+    ),
+)
+async def get_business_reviews(
+    business_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Trust-scoped business reviews with network_stats."""
+    user_id: str = str(current_user["id"])
+    pool = get_pool()
+
+    biz_row = await pool.fetchrow(
+        "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
+        business_id,
+    )
+    if not biz_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Business {business_id} not found.")
+    business = BusinessOut(**dict(biz_row))
+
+    direct_friends, fof = await get_trust_graph(user_id)
+    all_trusted = list(direct_friends | set(fof.keys()) | {user_id})
+
+    rows = await pool.fetch(
+        """
+        SELECT
+            r.id, r.rating, r.body, r.pros, r.cons, r.visibility, r.ai_polished, r.created_at,
+            r.user_id AS author_id,
+            u.email AS reviewer_email, u.name AS reviewer_name, u.bio AS reviewer_bio,
+            u.avatar_url AS reviewer_avatar_url, u.location AS reviewer_location,
+            u.invite_code AS reviewer_invite_code, u.created_at AS reviewer_created_at
+        FROM reviews r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.business_id = $1
+          AND r.user_id = ANY($2::uuid[])
+          AND r.visibility != 'private'
+        ORDER BY r.created_at DESC
+        """,
+        business_id,
+        all_trusted,
+    )
+
+    # Batch via_friend profiles
+    via_ids_needed: set = set()
+    for row in rows:
+        author_id = str(row["author_id"])
+        if author_id != user_id and author_id not in direct_friends:
+            via_id = fof.get(author_id)
+            if via_id:
+                via_ids_needed.add(via_id)
+
+    via_profile_map: dict = {}
+    if via_ids_needed:
+        via_rows = await pool.fetch(
+            "SELECT id, email, name, bio, avatar_url, location, invite_code, created_at FROM users WHERE id = ANY($1::uuid[])",
+            list(via_ids_needed),
+        )
+        via_profile_map = {str(r["id"]): dict(r) for r in via_rows}
+
+    reviews_out = []
+    friend_count = 0
+    hop2_count = 0
+
+    for row in rows:
+        author_id = str(row["author_id"])
+        if author_id == user_id:
+            trust_distance = 0
+            via_friend_data = None
+        elif author_id in direct_friends:
+            trust_distance = 1
+            via_friend_data = None
+            friend_count += 1
+        else:
+            trust_distance = 2
+            if row["visibility"] == "friends":
+                continue
+            via_id = fof.get(author_id)
+            via_raw = via_profile_map.get(via_id) if via_id else None
+            via_friend_data = UserOut(**via_raw) if via_raw else None
+            hop2_count += 1
+
+        try:
+            reviews_out.append(
+                ReviewWithContext(
+                    id=row["id"],
+                    rating=row["rating"],
+                    body=row["body"],
+                    pros=row["pros"],
+                    cons=row["cons"],
+                    visibility=row["visibility"],
+                    ai_polished=row["ai_polished"],
+                    created_at=row["created_at"],
+                    trust_distance=trust_distance,
+                    via_friend=via_friend_data,
+                    reviewer=UserOut(
+                        id=row["author_id"],
+                        email=row["reviewer_email"],
+                        name=row["reviewer_name"],
+                        bio=row["reviewer_bio"],
+                        avatar_url=row["reviewer_avatar_url"],
+                        location=row["reviewer_location"],
+                        invite_code=row["reviewer_invite_code"],
+                        created_at=row["reviewer_created_at"],
+                    ),
+                    business=business,
+                ).model_dump(mode="json")
+            )
+        except Exception:
+            continue
+
+    avg_rating = round(sum(r["rating"] for r in reviews_out) / len(reviews_out), 2) if reviews_out else 0.0
+
+    return {
+        "reviews": reviews_out,
+        "network_stats": {
+            "friend_count": friend_count,
+            "hop2_count": hop2_count,
+            "avg_rating": avg_rating,
+        },
+    }
