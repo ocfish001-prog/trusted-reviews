@@ -3,9 +3,11 @@ Trusted Reviews Network — FastAPI Application
 
 Entry point. Configures CORS, mounts all routers, and provides health check.
 """
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import settings
 from services.database import init_pool, close_pool
@@ -34,7 +36,7 @@ app = FastAPI(
 )
 
 # ============================================================
-# CORS
+# CORS — must be added FIRST so it wraps all responses including errors
 # ============================================================
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +45,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================================
+# Global exception handler — ensures unhandled errors still get CORS headers
+# (CORSMiddleware wraps this response because it's added as middleware above)
+# ============================================================
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions and return a proper JSON 500 with detail."""
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+    )
 
 # ============================================================
 # ROUTERS

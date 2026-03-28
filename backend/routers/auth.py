@@ -2,6 +2,7 @@
 Auth router — handles user signup and login.
 """
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from jose import jwt
 from passlib.context import CryptContext
@@ -70,8 +71,9 @@ async def signup(body: SignupRequest):
             detail="This invite code has already been used.",
         )
 
-    invite_creator_id: str = str(invite["created_by"])
-    invite_id: str = str(invite["id"])
+    # Keep UUID objects as-is — asyncpg requires native UUID, not str
+    invite_creator_id: UUID = invite["created_by"]
+    invite_id: UUID = invite["id"]
 
     # Check email not already registered
     existing = await pool.fetchrow("SELECT id FROM users WHERE email = $1", body.email)
@@ -84,17 +86,16 @@ async def signup(body: SignupRequest):
     # 2. Hash password
     password_hash = _hash_password(body.password)
 
-    # 3. Insert user
+    # 3. Insert user — store NULL for invite_code column (user's own code, not the one they used)
     user_row = await pool.fetchrow(
         """
-        INSERT INTO users (email, name, password_hash, invite_code)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (email, name, password_hash)
+        VALUES ($1, $2, $3)
         RETURNING id, email, name, bio, avatar_url, location, invite_code, created_at
         """,
         body.email,
         body.name,
         password_hash,
-        body.invite_code,
     )
     if not user_row:
         raise HTTPException(
@@ -102,7 +103,7 @@ async def signup(body: SignupRequest):
             detail="Failed to create user profile.",
         )
 
-    user_id: str = str(user_row["id"])
+    user_id: UUID = user_row["id"]
 
     # 4. Mark invite as used
     await pool.execute(
@@ -124,7 +125,7 @@ async def signup(body: SignupRequest):
     )
 
     # 6. Generate JWT
-    token = _create_token(user_id)
+    token = _create_token(str(user_id))
 
     return SignupResponse(
         user=UserOut(**dict(user_row)),
@@ -134,16 +135,15 @@ async def signup(body: SignupRequest):
 
 @router.post(
     "/login",
-    response_model=LoginResponse,
     summary="Log in with email and password",
-    description="Authenticate an existing user and return a JWT token.",
+    description="Authenticate an existing user and return a JWT token. Accepts JSON body with email/password.",
 )
 async def login(body: LoginRequest):
     """
     Authenticate a user:
     1. Look up user by email
     2. Verify password against bcrypt hash
-    3. Return JWT
+    3. Return JWT in both `token` and `access_token` formats for compatibility
     """
     pool = get_pool()
 
@@ -175,7 +175,12 @@ async def login(body: LoginRequest):
     token = _create_token(user_id)
 
     user_data = {k: v for k, v in dict(row).items() if k != "password_hash"}
-    return LoginResponse(
-        user=UserOut(**user_data),
-        token=token,
-    )
+    user_out = UserOut(**user_data)
+
+    # Return both formats: `token` for internal and `access_token`/`token_type` for OAuth2 compat
+    return {
+        "user": user_out.model_dump(mode="json"),
+        "token": token,
+        "access_token": token,
+        "token_type": "bearer",
+    }

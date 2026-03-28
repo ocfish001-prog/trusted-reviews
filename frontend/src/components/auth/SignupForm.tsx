@@ -6,7 +6,6 @@ import Link from 'next/link';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 import { signup } from '@/lib/api';
-import { login } from '@/lib/api';
 import { setToken, setStoredUser } from '@/lib/auth';
 
 export default function SignupForm() {
@@ -36,11 +35,10 @@ export default function SignupForm() {
     setLoading(true);
     setError('');
     try {
-      const user = await signup({ name, email, password, invite_code: inviteCode });
-      setStoredUser(user);
-      // Auto-login
-      const tokens = await login({ email, password });
-      setToken(tokens.access_token);
+      const result = await signup({ name, email, password, invite_code: inviteCode });
+      setStoredUser(result.user);
+      // Use token from signup response directly — no need for separate login
+      setToken(result.token);
       router.push('/feed');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your account. Check your invite code.');
