@@ -20,28 +20,12 @@ from .auth_deps import get_current_user
 router = APIRouter(prefix="/businesses", tags=["businesses"])
 
 
-@router.get(
-    "/{business_id}",
-    response_model=BusinessOut,
-    summary="Get a business by ID",
-)
-async def get_business(
-    business_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """Fetch a single business by its UUID."""
-    pool = get_pool()
-    row = await pool.fetchrow(
-        "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
-        business_id,
-    )
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Business {business_id} not found.",
-        )
-    return BusinessOut(**dict(row))
-
+# ────────────────────────────────────────────────────────────────────────────
+# IMPORTANT: Static routes (/search, /combined-search, /google-place) MUST be
+# defined BEFORE the /{business_id} path-parameter route.  FastAPI evaluates
+# routes in definition order — a /{business_id} catch-all placed first will
+# swallow "search", "combined-search", etc. as path parameter values.
+# ────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/search",
@@ -255,6 +239,33 @@ async def combined_search(
         )
 
     return CombinedSearchResponse(businesses=businesses, reviews=reviews)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Path-parameter routes MUST come AFTER all static routes above.
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/{business_id}",
+    response_model=BusinessOut,
+    summary="Get a business by ID",
+)
+async def get_business(
+    business_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch a single business by its UUID."""
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
+        business_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Business {business_id} not found.",
+        )
+    return BusinessOut(**dict(row))
 
 
 @router.get(
