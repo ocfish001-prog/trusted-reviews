@@ -29,6 +29,7 @@ export default function Navbar() {
           <div className="hidden sm:flex items-center gap-1">
             {[
               { href: '/feed', label: 'Feed' },
+              { href: '/map', label: 'Map' },
               { href: '/write', label: 'Write' },
               { href: '/invite', label: 'Invite' },
             ].map(({ href, label }) => (

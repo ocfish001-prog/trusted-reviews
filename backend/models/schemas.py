@@ -64,6 +64,34 @@ class BusinessSearchResponse(BaseModel):
     businesses: List[BusinessOut]
 
 
+class GooglePlaceUpsertRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    address: Optional[str] = None
+    category: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    google_place_id: str = Field(..., min_length=1, max_length=255)
+
+
+class ReviewSearchResult(BaseModel):
+    """Review result for combined search — includes business info."""
+    id: UUID
+    rating: int
+    body: Optional[str]
+    pros: Optional[List[str]]
+    cons: Optional[List[str]]
+    visibility: str
+    ai_polished: bool
+    created_at: datetime
+    business: BusinessOut
+    reviewer_name: Optional[str]
+
+
+class CombinedSearchResponse(BaseModel):
+    businesses: List[BusinessOut]
+    reviews: List[ReviewSearchResult]
+
+
 # ============================================================
 # REVIEWS
 # ============================================================

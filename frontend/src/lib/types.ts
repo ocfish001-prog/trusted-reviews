@@ -14,6 +14,36 @@ export interface Business {
   name: string;
   category?: string;
   address?: string;
+  lat?: number;
+  lng?: number;
+  google_place_id?: string;
+}
+
+export interface GooglePlaceUpsertPayload {
+  name: string;
+  address?: string;
+  category?: string;
+  lat?: number;
+  lng?: number;
+  google_place_id: string;
+}
+
+export interface ReviewSearchResult {
+  id: string;
+  rating: number;
+  body?: string;
+  pros?: string[];
+  cons?: string[];
+  visibility: string;
+  ai_polished: boolean;
+  created_at: string;
+  business: Business;
+  reviewer_name?: string;
+}
+
+export interface CombinedSearchResponse {
+  businesses: Business[];
+  reviews: ReviewSearchResult[];
 }
 
 export interface Review {

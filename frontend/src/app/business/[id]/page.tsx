@@ -5,12 +5,20 @@ import { useParams } from 'next/navigation';
 import BusinessHeader from '@/components/business/BusinessHeader';
 import NetworkStats from '@/components/business/NetworkStats';
 import ReviewCard from '@/components/feed/ReviewCard';
+import TrustBadge from '@/components/ui/TrustBadge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton, ReviewCardSkeleton } from '@/components/ui/Skeleton';
 import { getBusiness, getBusinessReviews } from '@/lib/api';
 import type { Business, Review } from '@/lib/types';
 import Link from 'next/link';
 import Button from '@/components/ui/Button';
+import { Star } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+function avg(reviews: Review[]): number {
+  if (!reviews.length) return 0;
+  return reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+}
 
 export default function BusinessPage() {
   const { id } = useParams<{ id: string }>();
@@ -41,6 +49,12 @@ export default function BusinessPage() {
     );
   }
 
+  // Compute friend vs network averages from reviews
+  const friendReviews = reviews.filter((r) => r.trust_distance === 1);
+  const networkReviews = reviews.filter((r) => (r.trust_distance ?? 99) > 1);
+  const friendAvg = avg(friendReviews);
+  const networkAvg = avg(networkReviews);
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
       {loading ? (
@@ -64,6 +78,38 @@ export default function BusinessPage() {
             hop2Count={networkStats.hop2_count}
             avgRating={networkStats.avg_rating}
           />
+
+          {/* Trust breakdown — friends vs network */}
+          {(friendReviews.length > 0 || networkReviews.length > 0) && (
+            <div className="flex gap-3">
+              {friendReviews.length > 0 && (
+                <div className="flex-1 flex items-center gap-2.5 bg-emerald-50 border border-emerald-200/60 rounded-xl px-3 py-2.5">
+                  <TrustBadge distance={1} showTooltip={false} />
+                  <div>
+                    <p className="text-[10px] text-emerald-600 font-medium">Friends say</p>
+                    <div className="flex items-center gap-1">
+                      <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                      <span className="text-sm font-bold text-slate-900">{friendAvg.toFixed(1)}</span>
+                      <span className="text-[10px] text-slate-400">({friendReviews.length})</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {networkReviews.length > 0 && (
+                <div className="flex-1 flex items-center gap-2.5 bg-amber-50 border border-amber-200/60 rounded-xl px-3 py-2.5">
+                  <TrustBadge distance={2} showTooltip={false} />
+                  <div>
+                    <p className="text-[10px] text-amber-600 font-medium">Network says</p>
+                    <div className="flex items-center gap-1">
+                      <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                      <span className="text-sm font-bold text-slate-900">{networkAvg.toFixed(1)}</span>
+                      <span className="text-[10px] text-slate-400">({networkReviews.length})</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </>
       ) : null}
 

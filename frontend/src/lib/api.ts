@@ -10,6 +10,8 @@ import type {
   CreateReviewPayload,
   AIAssistPayload,
   FeedFilters,
+  GooglePlaceUpsertPayload,
+  CombinedSearchResponse,
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -145,8 +147,62 @@ export async function searchBusinesses(query: string): Promise<Business[]> {
   return request<Business[]>(`/businesses/search?q=${encodeURIComponent(query)}`);
 }
 
+export async function upsertGoogleBusiness(placeData: GooglePlaceUpsertPayload): Promise<Business> {
+  return request<Business>('/businesses/google-place', {
+    method: 'POST',
+    body: JSON.stringify(placeData),
+  });
+}
+
+export async function combinedSearch(
+  query: string,
+  category?: string
+): Promise<CombinedSearchResponse> {
+  const params = new URLSearchParams({ q: query });
+  if (category) params.set('category', category);
+  return request<CombinedSearchResponse>(`/businesses/combined-search?${params.toString()}`);
+}
+
 export async function getBusinessReviews(id: string): Promise<{ reviews: Review[]; network_stats: { friend_count: number; hop2_count: number; avg_rating: number } }> {
   return request(`/businesses/${id}/reviews`);
+}
+
+// Map
+export interface MapBusiness extends Business {
+  trust_distance: number;
+  avg_rating: number;
+  review_count: number;
+  top_review_snippet?: string;
+  via_friend?: string;
+}
+
+export async function getMapBusinesses(): Promise<MapBusiness[]> {
+  // Derive map data from the feed — extract unique businesses with their best trust distance
+  const { reviews } = await getFeed({ cursor: undefined });
+  const businessMap = new Map<string, MapBusiness>();
+
+  for (const review of reviews) {
+    if (!review.business || review.business.lat == null || review.business.lng == null) continue;
+    const existing = businessMap.get(review.business_id);
+    const dist = review.trust_distance ?? 99;
+
+    if (!existing || dist < existing.trust_distance) {
+      businessMap.set(review.business_id, {
+        ...review.business,
+        trust_distance: dist,
+        avg_rating: review.rating,
+        review_count: 1,
+        top_review_snippet: review.body.slice(0, 120),
+        via_friend: review.via_friend,
+      });
+    } else {
+      // Update avg rating
+      existing.avg_rating = (existing.avg_rating * existing.review_count + review.rating) / (existing.review_count + 1);
+      existing.review_count += 1;
+    }
+  }
+
+  return Array.from(businessMap.values());
 }
 
 // Invites

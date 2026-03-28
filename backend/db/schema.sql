@@ -82,3 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_businesses_name_trgm ON businesses USING GIN (nam
 
 -- Invites: fast lookup by code
 CREATE INDEX IF NOT EXISTS idx_invites_code ON invites (code);
+
+-- Sprint 2: Google Places integration
+CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_google_place_id 
+ON businesses (google_place_id) WHERE google_place_id IS NOT NULL;

@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Star, Plus, X, Globe, Users, Lock } from 'lucide-react';
+import { Star, Plus, X, Globe, Users, Lock, RotateCcw } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import BusinessSearch from './BusinessSearch';
 import AIAssistPanel from './AIAssistPanel';
+import SmartPrompts, { combinePromptAnswers } from './SmartPrompts';
+import { useDraftSave } from '@/hooks/useDraftSave';
 import { createReview } from '@/lib/api';
 import type { Business, Review } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -24,12 +26,66 @@ export default function ReviewForm() {
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [body, setBody] = useState('');
+  const [promptAnswers, setPromptAnswers] = useState<Record<string, string>>({});
+  const [isFreeform, setIsFreeform] = useState(false);
   const [pros, setPros] = useState<string[]>(['']);
   const [cons, setCons] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('2hop');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
 
+  // ── Draft autosave ──────────────────────────────────────────────────────────
+  const draft = useDraftSave({
+    business,
+    rating,
+    body,
+    promptAnswers,
+    pros,
+    cons,
+    visibility,
+  });
+
+  // Show draft banner once on mount if there's a saved draft
+  useEffect(() => {
+    if (draft.hasDraft) setShowDraftBanner(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleResumeDraft = () => {
+    const saved = draft.resumeDraft();
+    if (!saved) return;
+    setBusiness(saved.business);
+    setRating(saved.rating);
+    setBody(saved.body);
+    setPromptAnswers(saved.promptAnswers ?? {});
+    setPros(saved.pros.length ? saved.pros : ['']);
+    setCons(saved.cons.length ? saved.cons : ['']);
+    setVisibility(saved.visibility);
+    setShowDraftBanner(false);
+  };
+
+  const handleDiscardDraft = () => {
+    draft.discardDraft();
+    setShowDraftBanner(false);
+  };
+
+  // ── Smart prompts: switching modes ─────────────────────────────────────────
+  const handleSwitchToFreeform = () => {
+    // Merge prompt answers into body text before switching
+    const combined = combinePromptAnswers(business?.category, promptAnswers);
+    if (combined && !body.trim()) {
+      setBody(combined);
+    } else if (combined && body.trim()) {
+      setBody(body.trim() + '\n\n' + combined);
+    }
+    setIsFreeform(true);
+  };
+
+  const handleSwitchToGuided = () => {
+    setIsFreeform(false);
+  };
+
+  // ── Pros / cons helpers ─────────────────────────────────────────────────────
   const addPro = () => setPros([...pros, '']);
   const updatePro = (i: number, v: string) => setPros(pros.map((p, idx) => idx === i ? v : p));
   const removePro = (i: number) => setPros(pros.filter((_, idx) => idx !== i));
@@ -38,11 +94,19 @@ export default function ReviewForm() {
   const updateCon = (i: number, v: string) => setCons(cons.map((c, idx) => idx === i ? v : c));
   const removeCon = (i: number) => setCons(cons.filter((_, idx) => idx !== i));
 
+  // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!business) { setError('Please select a business.'); return; }
     if (rating === 0) { setError('Please pick a star rating.'); return; }
-    if (!body.trim()) { setError('Please write a review.'); return; }
+
+    // Build final body from prompts or freeform
+    let finalBody = body.trim();
+    if (!isFreeform) {
+      const combined = combinePromptAnswers(business.category, promptAnswers);
+      finalBody = combined || finalBody;
+    }
+    if (!finalBody) { setError('Please write a review.'); return; }
 
     setLoading(true);
     setError('');
@@ -50,11 +114,12 @@ export default function ReviewForm() {
       const review: Review = await createReview({
         business_id: business.id,
         rating,
-        body,
+        body: finalBody,
         pros: pros.filter(Boolean),
         cons: cons.filter(Boolean),
         visibility,
       });
+      draft.clearOnSubmit();
       router.push(`/business/${review.business_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not post review. Try again.');
@@ -65,6 +130,43 @@ export default function ReviewForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Draft resume banner */}
+      {showDraftBanner && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <RotateCcw className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-amber-800 font-medium leading-tight">
+              You have an unfinished review.
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">Resume where you left off?</p>
+            <div className="flex gap-3 mt-2">
+              <button
+                type="button"
+                onClick={handleResumeDraft}
+                className="text-xs font-semibold text-amber-700 hover:text-amber-900 min-h-[44px] flex items-center"
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                className="text-xs text-amber-500 hover:text-amber-700 min-h-[44px] flex items-center"
+              >
+                Start fresh
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDraftBanner(false)}
+            className="text-amber-400 hover:text-amber-600 min-w-[44px] min-h-[44px] flex items-center justify-center"
+            aria-label="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-xl border border-red-100">
           {error}
@@ -74,7 +176,7 @@ export default function ReviewForm() {
       {/* Business */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-slate-700">Business</label>
-        <BusinessSearch value={business} onChange={setBusiness} />
+        <BusinessSearch value={business} onChange={(b) => { setBusiness(b); setPromptAnswers({}); }} />
       </div>
 
       {/* Rating */}
@@ -109,18 +211,38 @@ export default function ReviewForm() {
         </div>
       </div>
 
-      {/* Body */}
+      {/* Review body — smart prompts OR freeform */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-slate-700">Review</label>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={5}
-          placeholder="Share your honest experience..."
-          className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none"
-          required
-        />
-        <p className="text-xs text-slate-400">{body.length} characters</p>
+
+        {!isFreeform ? (
+          <SmartPrompts
+            category={business?.category}
+            answers={promptAnswers}
+            onChange={setPromptAnswers}
+            onFreeformToggle={handleSwitchToFreeform}
+          />
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleSwitchToGuided}
+                className="text-xs text-amber-600 hover:text-amber-700 font-medium underline underline-offset-2 min-h-[44px] flex items-center"
+              >
+                ← Use guided prompts
+              </button>
+            </div>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={5}
+              placeholder="Share your honest experience..."
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none"
+            />
+            <p className="text-xs text-slate-400">{body.length} characters</p>
+          </div>
+        )}
       </div>
 
       {/* AI Assist */}

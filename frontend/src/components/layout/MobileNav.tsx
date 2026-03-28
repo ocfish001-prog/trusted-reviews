@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, PenLine, UserCircle, Ticket } from 'lucide-react';
+import { Home, PenLine, UserCircle, Ticket, Map } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 
 const NAV_ITEMS = [
   { href: '/feed', label: 'Feed', icon: Home },
+  { href: '/map', label: 'Map', icon: Map },
   { href: '/write', label: 'Write', icon: PenLine },
   { href: '/invite', label: 'Invite', icon: Ticket },
   { href: '/profile/me', label: 'Profile', icon: UserCircle },

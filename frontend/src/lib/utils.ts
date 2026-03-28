@@ -36,7 +36,7 @@ export function getInitials(name: string): string {
 
 export function getTrustLabel(distance?: number): string {
   if (distance === 0) return 'You';
-  if (distance === 1) return 'Friend';
+  if (distance === 1) return 'Your friend';
   if (distance === 2) return 'Friend of friend';
   return 'Network';
 }
@@ -45,6 +45,52 @@ export function getTrustColor(distance?: number): string {
   if (distance === 1) return 'bg-amber-100 text-amber-700';
   if (distance === 2) return 'bg-slate-100 text-slate-600';
   return 'bg-slate-50 text-slate-400';
+}
+
+/** Returns ring/glow CSS classes for trust distance avatar rings */
+export function getTrustRingStyle(distance?: number): {
+  ringClass: string;
+  glowClass: string;
+  borderStyle: 'solid' | 'dashed' | 'dotted' | 'none';
+  color: string;
+} {
+  if (distance === 1) {
+    return {
+      ringClass: 'ring-2 ring-offset-2 ring-emerald-400',
+      glowClass: 'shadow-[0_0_0_3px_rgba(52,211,153,0.25)]',
+      borderStyle: 'solid',
+      color: '#34d399',
+    };
+  }
+  if (distance === 2) {
+    return {
+      ringClass: 'ring-2 ring-offset-2 ring-amber-400',
+      glowClass: '',
+      borderStyle: 'dashed',
+      color: '#fbbf24',
+    };
+  }
+  return {
+    ringClass: 'ring-1 ring-offset-1 ring-slate-300',
+    glowClass: '',
+    borderStyle: 'dotted',
+    color: '#94a3b8',
+  };
+}
+
+/** Returns pin color hex for map markers */
+export function getTrustPinColor(distance?: number): string {
+  if (distance === 1) return '#10b981'; // emerald-500
+  if (distance === 2) return '#f59e0b'; // amber-500
+  return '#94a3b8'; // slate-400
+}
+
+/** Returns a short tooltip explaining why a review is visible */
+export function getTrustTooltip(distance?: number, reviewerName?: string, viaFriend?: string): string {
+  if (distance === 1 && reviewerName) return `${reviewerName} is your friend`;
+  if (distance === 2 && reviewerName && viaFriend) return `${reviewerName} knows your friend ${viaFriend}`;
+  if (distance === 2 && reviewerName) return `${reviewerName} is in your network`;
+  return 'In your trust network';
 }
 
 export function copyToClipboard(text: string): Promise<void> {
