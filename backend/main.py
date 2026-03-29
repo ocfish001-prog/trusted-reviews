@@ -22,6 +22,9 @@ async def lifespan(app: FastAPI):
     from services.database import get_pool as _get_pool
     _pool = _get_pool()
     await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS osm_id text")
+    await _pool.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS zip_code text")
+    await _pool.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS home_lat float")
+    await _pool.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS home_lng float")
     await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS google_place_id text")
     # Ensure UNIQUE constraints exist for ON CONFLICT
     await _pool.execute("""

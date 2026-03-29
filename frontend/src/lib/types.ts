@@ -5,6 +5,9 @@ export interface User {
   bio?: string;
   avatar_url?: string;
   location?: string;
+  zip_code?: string;
+  home_lat?: number;
+  home_lng?: number;
   invite_code: string;
   created_at: string;
 }

@@ -33,14 +33,31 @@ async def update_me(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Update mutable profile fields: name, bio, avatar_url, location."""
-    allowed_fields = {"name", "bio", "avatar_url", "location"}
+    """Update mutable profile fields: name, bio, avatar_url, location, zip_code."""
+    allowed_fields = {"name", "bio", "avatar_url", "location", "zip_code"}
     updates = {k: v for k, v in body.items() if k in allowed_fields}
 
+    # If zip_code provided, geocode it to lat/lng
+    if "zip_code" in updates and updates["zip_code"]:
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={"q": updates["zip_code"], "format": "json", "limit": 1, "countrycodes": "us"},
+                    headers={"User-Agent": "TrustedReviews/1.0 (contact@trusted-reviews.app)"},
+                    timeout=5.0,
+                )
+                geo = resp.json()
+                if geo:
+                    updates["home_lat"] = float(geo[0]["lat"])
+                    updates["home_lng"] = float(geo[0]["lon"])
+        except Exception:
+            pass  # geocoding failure is non-fatal
+
     if not updates:
-        # Nothing to update — just return current profile
         return UserOut(**{
-            k: current_user[k]
+            k: current_user.get(k)
             for k in ("id", "email", "name", "bio", "avatar_url", "location", "invite_code", "created_at")
         })
 
@@ -52,7 +69,7 @@ async def update_me(
         f"""
         UPDATE users SET {set_clause}
         WHERE id = $1
-        RETURNING id, email, name, bio, avatar_url, location, invite_code, created_at
+        RETURNING id, email, name, bio, avatar_url, location, zip_code, home_lat, home_lng, invite_code, created_at
         """,
         str(current_user["id"]),
         *values,
@@ -60,7 +77,8 @@ async def update_me(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    return UserOut(**dict(row))
+    d = dict(row)
+    return UserOut(**{k: d.get(k) for k in ("id", "email", "name", "bio", "avatar_url", "location", "invite_code", "created_at")})
 
 
 @router.get(

@@ -30,7 +30,20 @@ interface UnifiedResult {
 
 const searchGooglePlaces = async (query: string): Promise<PlacePrediction[]> => {
   try {
-    const res = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(query)}`);
+    let url = `/api/places/autocomplete?input=${encodeURIComponent(query)}`;
+    // Add location bias from user's stored home location
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('tr_user');
+      if (stored) {
+        try {
+          const u = JSON.parse(stored);
+          if (u.home_lat && u.home_lng) {
+            url += `&lat=${u.home_lat}&lng=${u.home_lng}`;
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    }
+    const res = await fetch(url);
     const data = await res.json();
     return data.predictions || [];
   } catch {
