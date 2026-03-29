@@ -11,6 +11,7 @@ import type {
   AIAssistPayload,
   FeedFilters,
   GooglePlaceUpsertPayload,
+  OsmPlaceUpsertPayload,
   CombinedSearchResponse,
 } from './types';
 
@@ -182,6 +183,13 @@ export async function upsertGoogleBusiness(placeData: GooglePlaceUpsertPayload):
   return request<Business>('/businesses/google-place', {
     method: 'POST',
     body: JSON.stringify(placeData),
+  });
+}
+
+export async function upsertOsmBusiness(payload: OsmPlaceUpsertPayload): Promise<Business> {
+  return request<Business>('/businesses/osm-place', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

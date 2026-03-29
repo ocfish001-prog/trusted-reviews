@@ -17,6 +17,17 @@ export interface Business {
   lat?: number;
   lng?: number;
   google_place_id?: string;
+  osm_id?: string;
+}
+
+export interface OsmPlaceUpsertPayload {
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  category: string;
+  osm_id: string;
+  google_place_id?: string;
 }
 
 export interface GooglePlaceUpsertPayload {

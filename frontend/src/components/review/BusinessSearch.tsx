@@ -2,87 +2,128 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X, MapPin } from 'lucide-react';
-import { searchBusinesses, upsertGoogleBusiness } from '@/lib/api';
+import { searchBusinesses, upsertOsmBusiness } from '@/lib/api';
 import type { Business } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import {
-  getPlacePredictions,
-  getPlaceDetails,
-  highlightMatch,
-  type PlacePrediction,
-} from '@/lib/googlePlaces';
-
-const GOOGLE_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ?? '';
+import { highlightMatch } from '@/lib/googlePlaces';
 
 interface BusinessSearchProps {
   value: Business | null;
   onChange: (business: Business | null) => void;
 }
 
-type ResultSource = 'google' | 'db';
+interface OsmResult {
+  place_id: number;
+  osm_id: string;
+  osm_type: string;
+  display_name: string;
+  name: string;
+  lat: string;
+  lon: string;
+  type: string;
+  category: string;
+  address?: {
+    road?: string;
+    house_number?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postcode?: string;
+  };
+}
 
 interface UnifiedResult {
-  source: ResultSource;
-  business?: Business;          // DB result
-  prediction?: PlacePrediction; // Google result
-  /** Displayed label */
+  source: 'db' | 'osm';
+  business?: Business;
+  osm?: OsmResult;
   label: string;
   sublabel?: string;
 }
 
+const searchOSM = async (query: string): Promise<OsmResult[]> => {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=8&countrycodes=us`,
+    { headers: { 'User-Agent': 'TrustedReviews/1.0 (contact@trusted-reviews.app)' } }
+  );
+  return res.json();
+};
+
+const enrichWithGoogle = async (name: string, address: string): Promise<{ place_id: string } | null> => {
+  const key = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY;
+  if (!key) return null;
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(name + ' ' + address)}&inputtype=textquery&fields=place_id,geometry&key=${key}`
+    );
+    const data = await res.json();
+    return data.candidates?.[0] || null;
+  } catch {
+    return null;
+  }
+};
+
+function osmDisplayAddress(osm: OsmResult): string {
+  if (osm.address) {
+    const parts: string[] = [];
+    if (osm.address.house_number && osm.address.road) {
+      parts.push(`${osm.address.house_number} ${osm.address.road}`);
+    } else if (osm.address.road) {
+      parts.push(osm.address.road);
+    }
+    if (osm.address.city) parts.push(osm.address.city);
+    if (osm.address.state) parts.push(osm.address.state);
+    if (parts.length > 0) return parts.join(', ');
+  }
+  // Fallback: strip name from display_name
+  const dn = osm.display_name;
+  const namePrefix = osm.name ? dn.replace(new RegExp('^' + osm.name + ',\\s*'), '') : dn;
+  return namePrefix.split(',').slice(0, 3).join(',').trim();
+}
+
+function osmName(osm: OsmResult): string {
+  if (osm.name) return osm.name;
+  // fallback: first part of display_name
+  return osm.display_name.split(',')[0].trim();
+}
+
 export default function BusinessSearch({ value, onChange }: BusinessSearchProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<UnifiedResult[]>([]);
+  const [dbResults, setDbResults] = useState<Business[]>([]);
+  const [osmResults, setOsmResults] = useState<OsmResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  const [selectingGoogle, setSelectingGoogle] = useState(false);
+  const [selectingOsm, setSelectingOsm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const usingGoogle = GOOGLE_API_KEY.length > 0;
 
-  const search = useCallback(
-    async (q: string) => {
-      if (q.length < 2) {
-        setResults([]);
-        setError(null);
-        return;
-      }
-
-      setLoading(true);
+  const search = useCallback(async (q: string) => {
+    if (q.length < 2) {
+      setDbResults([]);
+      setOsmResults([]);
       setError(null);
+      return;
+    }
 
-      try {
-        if (usingGoogle) {
-          // Primary: Google Places Autocomplete
-          const predictions = await getPlacePredictions(q, GOOGLE_API_KEY);
-          const googleResults: UnifiedResult[] = predictions.map((p) => ({
-            source: 'google' as ResultSource,
-            prediction: p,
-            label: p.main_text,
-            sublabel: p.secondary_text,
-          }));
-          setResults(googleResults);
-        } else {
-          // Fallback: DB search
-          const businesses = await searchBusinesses(q);
-          const dbResults: UnifiedResult[] = businesses.map((biz) => ({
-            source: 'db' as ResultSource,
-            business: biz,
-            label: biz.name,
-            sublabel: biz.category,
-          }));
-          setResults(dbResults);
-        }
-      } catch {
-        setError('Search unavailable. Please try again.');
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [usingGoogle]
-  );
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [db, osm] = await Promise.allSettled([
+        searchBusinesses(q),
+        searchOSM(q),
+      ]);
+
+      setDbResults(db.status === 'fulfilled' ? db.value : []);
+      // Filter OSM results to only show named places (not roads/addresses without names)
+      const osmData = osm.status === 'fulfilled' ? osm.value : [];
+      setOsmResults(osmData.filter(r => osmName(r).length > 1));
+    } catch {
+      setError('Search unavailable. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -101,52 +142,48 @@ export default function BusinessSearch({ value, onChange }: BusinessSearchProps)
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const handleSelect = useCallback(
-    async (result: UnifiedResult) => {
-      if (result.source === 'db' && result.business) {
-        onChange(result.business);
-        setOpen(false);
-        setQuery('');
-        return;
-      }
+  const handleSelectDb = useCallback((business: Business) => {
+    onChange(business);
+    setOpen(false);
+    setQuery('');
+  }, [onChange]);
 
-      if (result.source === 'google' && result.prediction) {
-        setSelectingGoogle(true);
-        setError(null);
-        try {
-          const details = await getPlaceDetails(result.prediction.place_id, GOOGLE_API_KEY);
-          if (!details) throw new Error('Could not load place details');
+  const handleSelectOsm = useCallback(async (osm: OsmResult) => {
+    setSelectingOsm(true);
+    setError(null);
+    try {
+      const name = osmName(osm);
+      const address = osmDisplayAddress(osm);
+      const osmIdStr = `${osm.osm_type}/${osm.osm_id ?? osm.place_id}`;
 
-          // Upsert into backend
-          const business = await upsertGoogleBusiness({
-            name: details.name,
-            address: details.formatted_address,
-            category: details.category,
-            lat: details.lat,
-            lng: details.lng,
-            google_place_id: details.place_id,
-          });
+      // Enrich with Google (silent fail)
+      const googleResult = await enrichWithGoogle(name, address);
 
-          onChange(business);
-          setOpen(false);
-          setQuery('');
-        } catch {
-          setError('Could not load business details. Please try again.');
-        } finally {
-          setSelectingGoogle(false);
-        }
-      }
-    },
-    [onChange]
-  );
+      const business = await upsertOsmBusiness({
+        name,
+        address,
+        lat: parseFloat(osm.lat),
+        lng: parseFloat(osm.lon),
+        category: osm.type || osm.category || 'business',
+        osm_id: osmIdStr,
+        google_place_id: googleResult?.place_id,
+      });
+
+      onChange(business);
+      setOpen(false);
+      setQuery('');
+    } catch {
+      setError('Could not add this business. Please try again.');
+    } finally {
+      setSelectingOsm(false);
+    }
+  }, [onChange]);
 
   if (value) {
     return (
       <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 min-h-[44px]">
         <div className="flex items-start gap-2">
-          {value.google_place_id && (
-            <MapPin className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-          )}
+          <MapPin className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
           <div>
             <p className="font-medium text-slate-900 text-sm">{value.name}</p>
             {value.category && (
@@ -167,6 +204,10 @@ export default function BusinessSearch({ value, onChange }: BusinessSearchProps)
       </div>
     );
   }
+
+  const hasDbResults = dbResults.length > 0;
+  const hasOsmResults = osmResults.length > 0;
+  const hasAnyResults = hasDbResults || hasOsmResults;
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -194,79 +235,115 @@ export default function BusinessSearch({ value, onChange }: BusinessSearchProps)
           role="listbox"
           aria-label="Business suggestions"
         >
-          {/* Loading state */}
-          {(loading || selectingGoogle) && (
+          {/* Loading / selecting state */}
+          {(loading || selectingOsm) && (
             <div className="px-4 py-3 text-sm text-slate-400 text-center">
-              {selectingGoogle ? 'Loading business details…' : 'Searching…'}
+              {selectingOsm ? 'Adding business…' : 'Searching…'}
             </div>
           )}
 
-          {/* Error state */}
-          {!loading && !selectingGoogle && error && (
+          {/* Error */}
+          {!loading && !selectingOsm && error && (
             <div className="px-4 py-3 text-sm text-red-500 text-center">{error}</div>
           )}
 
           {/* Empty state */}
-          {!loading && !selectingGoogle && !error && results.length === 0 && (
+          {!loading && !selectingOsm && !error && !hasAnyResults && (
             <div className="px-4 py-3 text-sm text-slate-400 text-center">
               No businesses found. Try a different name.
             </div>
           )}
 
-          {/* Results */}
-          {!loading && !selectingGoogle && results.length > 0 && (
-            <ul>
-              {results.map((result) => {
-                const key =
-                  result.source === 'google'
-                    ? result.prediction!.place_id
-                    : result.business!.id;
-
-                // Highlight matching characters in label
-                const segments = highlightMatch(result.label, query);
-
-                return (
-                  <li key={key} role="option">
-                    <button
-                      className={cn(
-                        'w-full px-4 py-3 text-left hover:bg-amber-50 active:bg-amber-100 transition-colors',
-                        'border-b border-slate-50 last:border-0',
-                        'min-h-[44px] flex flex-col justify-center'
-                      )}
-                      onClick={() => handleSelect(result)}
-                    >
-                      <p className="font-medium text-slate-900 text-sm leading-snug">
-                        {segments.map((seg, i) =>
-                          seg.bold ? (
-                            <strong key={i} className="font-semibold">
-                              {seg.text}
-                            </strong>
-                          ) : (
-                            <span key={i}>{seg.text}</span>
-                          )
+          {/* DB results section — "In Trusted Reviews" */}
+          {!loading && !selectingOsm && hasDbResults && (
+            <>
+              <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100">
+                In Trusted Reviews
+              </div>
+              <ul>
+                {dbResults.map((biz) => {
+                  const segments = highlightMatch(biz.name, query);
+                  return (
+                    <li key={biz.id} role="option">
+                      <button
+                        className={cn(
+                          'w-full px-4 py-3 text-left hover:bg-amber-50 active:bg-amber-100 transition-colors',
+                          'border-b border-slate-50 last:border-0',
+                          'min-h-[44px] flex flex-col justify-center'
                         )}
-                      </p>
-                      {result.sublabel && (
-                        <p className="text-xs text-slate-400 mt-0.5 truncate">
-                          {result.sublabel}
+                        onClick={() => handleSelectDb(biz)}
+                      >
+                        <p className="font-medium text-slate-900 text-sm leading-snug">
+                          {segments.map((seg, i) =>
+                            seg.bold ? (
+                              <strong key={i} className="font-semibold">{seg.text}</strong>
+                            ) : (
+                              <span key={i}>{seg.text}</span>
+                            )
+                          )}
                         </p>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                        {biz.category && (
+                          <p className="text-xs text-slate-400 mt-0.5 truncate">{biz.category}</p>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
 
-          {/* Google attribution — required by ToS when showing Google results */}
-          {!loading && usingGoogle && results.length > 0 && (
-            <div className="px-4 py-2 border-t border-slate-100 flex items-center justify-end gap-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="https://maps.gstatic.com/mapfiles/api-3/images/powered-by-google-on-white3.png"
-                alt="Powered by Google"
-                className="h-4 opacity-60"
-              />
+          {/* OSM results section — "Add from map" */}
+          {!loading && !selectingOsm && hasOsmResults && (
+            <>
+              <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100 border-t border-t-slate-100">
+                Add from map
+              </div>
+              <ul>
+                {osmResults.map((osm) => {
+                  const name = osmName(osm);
+                  const addr = osmDisplayAddress(osm);
+                  const segments = highlightMatch(name, query);
+                  const key = `osm-${osm.place_id}`;
+                  return (
+                    <li key={key} role="option">
+                      <button
+                        className={cn(
+                          'w-full px-4 py-3 text-left hover:bg-amber-50 active:bg-amber-100 transition-colors',
+                          'border-b border-slate-50 last:border-0',
+                          'min-h-[44px] flex flex-col justify-center'
+                        )}
+                        onClick={() => handleSelectOsm(osm)}
+                      >
+                        <div className="flex items-start gap-2">
+                          <MapPin className="w-3.5 h-3.5 text-slate-300 mt-0.5 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-900 text-sm leading-snug">
+                              {segments.map((seg, i) =>
+                                seg.bold ? (
+                                  <strong key={i} className="font-semibold">{seg.text}</strong>
+                                ) : (
+                                  <span key={i}>{seg.text}</span>
+                                )
+                              )}
+                            </p>
+                            {addr && (
+                              <p className="text-xs text-slate-400 mt-0.5 truncate">{addr}</p>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+
+          {/* OSM attribution */}
+          {!loading && hasOsmResults && (
+            <div className="px-4 py-1.5 border-t border-slate-100 text-[10px] text-slate-300 text-right">
+              Map data © OpenStreetMap contributors
             </div>
           )}
         </div>
