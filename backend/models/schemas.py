@@ -57,6 +57,7 @@ class BusinessOut(BaseModel):
     lat: Optional[float]
     lng: Optional[float]
     google_place_id: Optional[str]
+    osm_id: Optional[str] = None
     created_at: datetime
 
 
@@ -71,6 +72,15 @@ class GooglePlaceUpsertRequest(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     google_place_id: str = Field(..., min_length=1, max_length=255)
+
+
+class OsmPlaceUpsertRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    address: Optional[str] = None
+    category: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    osm_id: str = Field(..., min_length=1, max_length=255)
 
 
 class ReviewSearchResult(BaseModel):

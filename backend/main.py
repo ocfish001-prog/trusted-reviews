@@ -18,6 +18,10 @@ from routers import auth, feed, reviews, businesses, invites, graph, users
 async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle for the asyncpg pool."""
     await init_pool(settings.database_url)
+    # Run migrations (idempotent)
+    from services.database import get_pool as _get_pool
+    _pool = _get_pool()
+    await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS osm_id text UNIQUE")
     yield
     await close_pool()
 

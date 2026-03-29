@@ -8,6 +8,7 @@ from models.schemas import (
     BusinessSearchResponse,
     BusinessOut,
     GooglePlaceUpsertRequest,
+    OsmPlaceUpsertRequest,
     CombinedSearchResponse,
     ReviewSearchResult,
     ReviewWithContext,
@@ -47,7 +48,7 @@ async def search_businesses(
     pool = get_pool()
     rows = await pool.fetch(
         """
-        SELECT id, name, category, address, lat, lng, google_place_id, created_at
+        SELECT id, name, category, address, lat, lng, google_place_id, osm_id, created_at
         FROM businesses
         WHERE name ILIKE $1
         ORDER BY name
@@ -93,7 +94,7 @@ async def upsert_google_place(
                 category = EXCLUDED.category,
                 lat      = EXCLUDED.lat,
                 lng      = EXCLUDED.lng
-            RETURNING id, name, category, address, lat, lng, google_place_id, created_at
+            RETURNING id, name, category, address, lat, lng, google_place_id, osm_id, created_at
             """,
             payload.name,
             payload.address,
@@ -112,6 +113,57 @@ async def upsert_google_place(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Upsert returned no row",
+        )
+
+    return BusinessOut(**dict(row))
+
+
+@router.post(
+    "/osm-place",
+    response_model=BusinessOut,
+    summary="Upsert a business from OSM data",
+    description=(
+        "Create or update a business record using data from OpenStreetMap (Nominatim). "
+        "Matches on osm_id. Returns the existing or newly created business."
+    ),
+    status_code=status.HTTP_200_OK,
+)
+async def upsert_osm_place(
+    payload: OsmPlaceUpsertRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Upsert a business from OSM/Nominatim data."""
+    pool = get_pool()
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO businesses (name, address, lat, lng, category, osm_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (osm_id) DO UPDATE SET
+                name=EXCLUDED.name,
+                address=EXCLUDED.address,
+                lat=EXCLUDED.lat,
+                lng=EXCLUDED.lng,
+                category=EXCLUDED.category
+            RETURNING id, name, category, address, lat, lng, google_place_id, osm_id, created_at
+            """,
+            payload.name,
+            payload.address,
+            payload.lat,
+            payload.lng,
+            payload.category,
+            payload.osm_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OSM upsert failed: {str(exc)}",
+        )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OSM upsert returned no row",
         )
 
     return BusinessOut(**dict(row))
@@ -141,7 +193,7 @@ async def combined_search(
     try:
         # Search businesses
         biz_query = """
-            SELECT id, name, category, address, lat, lng, google_place_id, created_at
+            SELECT id, name, category, address, lat, lng, google_place_id, osm_id, created_at
             FROM businesses
             WHERE name ILIKE $1
         """
