@@ -13,6 +13,9 @@ from models.schemas import (
     ReviewWithContext,
     UserOut,
     BusinessOut,
+    CreateReactionRequest,
+    ReactionOut,
+    ReactionSummary,
 )
 from services.database import get_pool
 from services.trust_graph import get_trust_graph
@@ -291,4 +294,89 @@ async def get_business_reviews(
         reviews=reviews_out,
         network_avg_rating=avg_rating,
         network_review_count=len(reviews_out),
+    )
+
+
+# ============================================================
+# REACTIONS
+# ============================================================
+
+@router.post(
+    "/reviews/{review_id}/reactions",
+    summary="Toggle a reaction on a review",
+    description=(
+        "Add or remove a reaction (helpful, agree, thanks) on a review. "
+        "If the user already has the same reaction type, it removes it (toggle)."
+    ),
+)
+async def toggle_reaction(
+    review_id: str,
+    body: CreateReactionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Toggle a reaction on a review."""
+    user_id = str(current_user["id"])
+    pool = get_pool()
+
+    # Verify review exists
+    review = await pool.fetchrow("SELECT id FROM reviews WHERE id = $1", review_id)
+    if not review:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+
+    # Check if reaction already exists
+    existing = await pool.fetchrow(
+        "SELECT id FROM reactions WHERE review_id = $1 AND user_id = $2 AND type = $3",
+        review_id, user_id, body.type,
+    )
+
+    if existing:
+        # Remove existing reaction (toggle off)
+        await pool.execute("DELETE FROM reactions WHERE id = $1", existing["id"])
+        return {"removed": True, "type": body.type}
+
+    # Add new reaction
+    row = await pool.fetchrow(
+        """
+        INSERT INTO reactions (review_id, user_id, type)
+        VALUES ($1, $2, $3)
+        RETURNING id, review_id, user_id, type, created_at
+        """,
+        review_id, user_id, body.type,
+    )
+
+    return ReactionOut(**dict(row))
+
+
+@router.get(
+    "/reviews/{review_id}/reactions",
+    response_model=ReactionSummary,
+    summary="Get reaction counts for a review",
+)
+async def get_reactions(
+    review_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get reaction summary for a review."""
+    user_id = str(current_user["id"])
+    pool = get_pool()
+
+    # Get counts by type
+    rows = await pool.fetch(
+        "SELECT type, COUNT(*) as count FROM reactions WHERE review_id = $1 GROUP BY type",
+        review_id,
+    )
+    counts = {row["type"]: row["count"] for row in rows}
+
+    # Get current user's reactions
+    user_rows = await pool.fetch(
+        "SELECT type FROM reactions WHERE review_id = $1 AND user_id = $2",
+        review_id, user_id,
+    )
+    user_reactions = [row["type"] for row in user_rows]
+
+    return ReactionSummary(
+        helpful=counts.get("helpful", 0),
+        agree=counts.get("agree", 0),
+        thanks=counts.get("thanks", 0),
+        user_reactions=user_reactions,
     )

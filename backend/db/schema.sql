@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     lat             FLOAT,
     lng             FLOAT,
     google_place_id TEXT,
+    osm_id          TEXT,
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
@@ -86,3 +87,19 @@ CREATE INDEX IF NOT EXISTS idx_invites_code ON invites (code);
 -- Sprint 2: Google Places integration
 CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_google_place_id 
 ON businesses (google_place_id) WHERE google_place_id IS NOT NULL;
+
+-- Reactions
+CREATE TABLE IF NOT EXISTS reactions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    review_id   UUID NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL CHECK (type IN ('helpful', 'agree', 'thanks')),
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (review_id, user_id, type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reactions_review_id ON reactions (review_id);
+
+-- OSM integration
+CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_osm_id
+ON businesses (osm_id) WHERE osm_id IS NOT NULL;

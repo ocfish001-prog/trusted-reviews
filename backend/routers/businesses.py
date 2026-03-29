@@ -87,7 +87,7 @@ async def upsert_google_place(
             """
             INSERT INTO businesses (name, address, category, lat, lng, google_place_id)
             VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (google_place_id)
+            ON CONFLICT (google_place_id) WHERE google_place_id IS NOT NULL
             DO UPDATE SET
                 name     = EXCLUDED.name,
                 address  = EXCLUDED.address,
@@ -139,7 +139,7 @@ async def upsert_osm_place(
             """
             INSERT INTO businesses (name, address, lat, lng, category, osm_id)
             VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (osm_id) DO UPDATE SET
+            ON CONFLICT (osm_id) WHERE osm_id IS NOT NULL DO UPDATE SET
                 name=EXCLUDED.name,
                 address=EXCLUDED.address,
                 lat=EXCLUDED.lat,

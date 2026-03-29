@@ -211,6 +211,33 @@ class InvitesListResponse(BaseModel):
 # GRAPH
 # ============================================================
 
+# ============================================================
+# REACTIONS
+# ============================================================
+
+class CreateReactionRequest(BaseModel):
+    type: str = Field(..., pattern="^(helpful|agree|thanks)$")
+
+
+class ReactionOut(BaseModel):
+    id: UUID
+    review_id: UUID
+    user_id: UUID
+    type: str
+    created_at: datetime
+
+
+class ReactionSummary(BaseModel):
+    helpful: int = 0
+    agree: int = 0
+    thanks: int = 0
+    user_reactions: List[str] = []  # types the current user has reacted with
+
+
+# ============================================================
+# GRAPH
+# ============================================================
+
 class FriendOut(BaseModel):
     id: UUID
     name: Optional[str]
