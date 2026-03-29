@@ -29,7 +29,6 @@ router = APIRouter(prefix="/businesses", tags=["businesses"])
 
 @router.get(
     "/search",
-    response_model=BusinessSearchResponse,
     summary="Search businesses by name",
     description=(
         "Search for businesses using PostgreSQL trigram similarity on the business name. "
@@ -46,26 +45,20 @@ async def search_businesses(
     Uses the pg_trgm GIN index on businesses.name for fast fuzzy matching.
     """
     pool = get_pool()
-    try:
-        rows = await pool.fetch(
-            """
-            SELECT id, name, category, address, lat, lng, google_place_id, created_at
-            FROM businesses
-            WHERE name ILIKE $1
-            ORDER BY name
-            LIMIT $2
-            """,
-            f"%{q}%",
-            limit,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search failed: {str(exc)}",
-        )
+    rows = await pool.fetch(
+        """
+        SELECT id, name, category, address, lat, lng, google_place_id, created_at
+        FROM businesses
+        WHERE name ILIKE $1
+        ORDER BY name
+        LIMIT $2
+        """,
+        f"%{q}%",
+        limit,
+    )
 
     businesses = [BusinessOut(**dict(b)) for b in rows]
-    return BusinessSearchResponse(businesses=businesses)
+    return businesses
 
 
 @router.post(
