@@ -22,6 +22,16 @@ async def lifespan(app: FastAPI):
     from services.database import get_pool as _get_pool
     _pool = _get_pool()
     await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS osm_id text UNIQUE")
+    await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS google_place_id text")
+    await _pool.execute("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'businesses_google_place_id_key'
+            ) THEN
+                ALTER TABLE businesses ADD CONSTRAINT businesses_google_place_id_key UNIQUE (google_place_id);
+            END IF;
+        END $$;
+    """)
     yield
     await close_pool()
 
