@@ -21,16 +21,38 @@ async def lifespan(app: FastAPI):
     # Run migrations (idempotent)
     from services.database import get_pool as _get_pool
     _pool = _get_pool()
-    await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS osm_id text UNIQUE")
+    await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS osm_id text")
     await _pool.execute("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS google_place_id text")
+    # Drop old non-partial unique constraints that conflict with ON CONFLICT ... WHERE
     await _pool.execute("""
         DO $$ BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'businesses_google_place_id_key'
-            ) THEN
-                ALTER TABLE businesses ADD CONSTRAINT businesses_google_place_id_key UNIQUE (google_place_id);
-            END IF;
+            ALTER TABLE businesses DROP CONSTRAINT IF EXISTS businesses_osm_id_key;
+            ALTER TABLE businesses DROP CONSTRAINT IF EXISTS businesses_google_place_id_key;
+        EXCEPTION WHEN undefined_object THEN NULL;
         END $$;
+    """)
+    # Create partial unique indexes (idempotent) — required for ON CONFLICT ... WHERE
+    await _pool.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_google_place_id
+        ON businesses (google_place_id) WHERE google_place_id IS NOT NULL
+    """)
+    await _pool.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_osm_id
+        ON businesses (osm_id) WHERE osm_id IS NOT NULL
+    """)
+    # Create reactions table
+    await _pool.execute("""
+        CREATE TABLE IF NOT EXISTS reactions (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            review_id   UUID NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+            user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            type        TEXT NOT NULL CHECK (type IN ('helpful', 'agree', 'thanks')),
+            created_at  TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (review_id, user_id, type)
+        )
+    """)
+    await _pool.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reactions_review_id ON reactions (review_id)
     """)
     yield
     await close_pool()
