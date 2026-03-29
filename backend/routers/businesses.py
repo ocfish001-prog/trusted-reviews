@@ -245,9 +245,8 @@ async def combined_search(
 )
 async def get_business(
     business_id: str,
-    current_user: dict = Depends(get_current_user),
 ):
-    """Fetch a single business by its UUID."""
+    """Fetch a single business by its UUID. Public endpoint — no auth required."""
     pool = get_pool()
     row = await pool.fetchrow(
         "SELECT id, name, category, address, lat, lng, google_place_id, created_at FROM businesses WHERE id = $1",
