@@ -19,8 +19,7 @@ export default function LoginForm() {
   const [error, setError] = useState('');
   const [magicSent, setMagicSent] = useState(false);
 
-  const handlePasswordLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePasswordLogin = async () => {
     if (!email || !password) return;
     setLoading(true);
     setError('');
@@ -40,8 +39,7 @@ export default function LoginForm() {
     }
   };
 
-  const handleMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleMagicLink = async () => {
     if (!email) return;
     setLoading(true);
     setError('');
@@ -53,6 +51,11 @@ export default function LoginForm() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = () => {
+    if (mode === 'password') handlePasswordLogin();
+    else handleMagicLink();
   };
 
   if (magicSent) {
@@ -99,33 +102,36 @@ export default function LoginForm() {
         </div>
       )}
 
-      <form onSubmit={mode === 'password' ? handlePasswordLogin : handleMagicLink} className="space-y-4">
+      <div className="space-y-4">
         <Input
+          data-testid="email-input"
           label="Email"
           type="email"
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          required
           autoComplete="email"
+          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
         />
 
         {mode === 'password' && (
           <Input
+            data-testid="password-input"
             label="Password"
             type="password"
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            required
             autoComplete="current-password"
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
           />
         )}
 
-        <Button type="submit" className="w-full" loading={loading}>
+        <Button data-testid="login-submit" type="button" onClick={handleSubmit} className="w-full" loading={loading}>
           {mode === 'password' ? 'Sign in' : 'Send magic link'}
         </Button>
-      </form>
+        <span data-testid="react-hydrated" style={{ display: 'none' }} />
+      </div>
 
       <p className="text-sm text-center text-slate-500">
         Don&apos;t have an account?{' '}
