@@ -78,7 +78,7 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="space-y-6">
+    <div data-testid="login-form" className="space-y-6">
       {/* Mode toggle */}
       <div className="flex rounded-xl border border-slate-200 p-1 bg-slate-50">
         {(['password', 'magic'] as Mode[]).map((m) => (

@@ -74,6 +74,7 @@ function highlightMatch(text: string, query: string): Array<{ text: string; bold
 
 export default function BusinessSearch({ value, onChange }: BusinessSearchProps) {
   const [query, setQuery] = useState('');
+  const [userHasLocation, setUserHasLocation] = useState(false);
   const [dbResults, setDbResults] = useState<Business[]>([]);
   const [googleResults, setGoogleResults] = useState<PlacePrediction[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,6 +83,18 @@ export default function BusinessSearch({ value, onChange }: BusinessSearchProps)
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('tr_user');
+      if (stored) {
+        try {
+          const u = JSON.parse(stored);
+          setUserHasLocation(!!(u.home_lat && u.home_lng));
+        } catch { /* ignore */ }
+      }
+    }
+  }, []);
 
   const search = useCallback(async (q: string) => {
     if (q.length < 1) {
@@ -194,10 +207,16 @@ export default function BusinessSearch({ value, onChange }: BusinessSearchProps)
           onFocus={() => setOpen(true)}
           placeholder="Search for a business…"
           className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+          data-testid="business-search-input"
           aria-label="Search for a business"
           autoComplete="off"
         />
       </div>
+      {!userHasLocation && (
+        <p className="text-xs text-slate-400 mt-1">
+          💡 <a href="/profile" className="text-amber-500 hover:underline">Set your zip code</a> to see local businesses first
+        </p>
+      )}
 
       {open && query.length >= 1 && (
         <div className="absolute z-10 top-full mt-2 w-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden">
